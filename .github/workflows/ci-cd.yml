@@ -1,0 +1,80 @@
+name: EKS Strimzi CI/CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Select Terraform action"
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Terraform Init
+      run: terraform init
+
+    - name: Terraform Plan (preview)
+      run: terraform plan
+      if: github.event_name == 'push' || github.event.inputs.action == 'apply'
+
+    - name: Terraform Apply
+      run: terraform apply -auto-approve
+      if: github.event.inputs.action == 'apply' || github.event_name == 'push'
+
+    - name: Terraform Destroy
+      run: terraform destroy -auto-approve
+      if: github.event.inputs.action == 'destroy'
+
+  deploy_k8s:
+    needs: terraform
+    if: github.event.inputs.action == 'apply' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    - name: Install kubectl
+      run: |
+        curl -LO "https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl"
+        chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+    - name: Update kubeconfig
+      run: aws eks update-kubeconfig --name kafka-cluster --region $AWS_REGION
+    - name: Deploy Strimzi & Kafka
+      run: |
+        kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f -
+        kubectl apply -f kafka-cluster.yaml -n kafka
+        kubectl apply -f kafka-bridge.yaml -n kafka
+    - name: Wait for Pods
+      run: |
+        kubectl wait --for=condition=ready pod -l strimzi.io/name=my-cluster-kafka -n kafka --timeout=600s
+        kubectl wait --for=condition=ready pod -l strimzi.io/name=my-bridge-bridge -n kafka --timeout=300s
