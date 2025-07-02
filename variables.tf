@@ -9,3 +9,9 @@ variable "key_name" {
   type        = string
   default     = "eks-kafka"
 }
+
+variable "use_existing_roles" {
+  description = "When true, import existing IAM roles instead of creating new ones"
+  type        = bool
+  default     = true
+}
