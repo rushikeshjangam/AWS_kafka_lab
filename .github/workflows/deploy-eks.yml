@@ -1,10 +1,9 @@
-name: EKS Strimzi Kafka Deploy
+name: Deploy EKS + Strimzi Kafka
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
 
 env:
   AWS_REGION: us-east-1
@@ -12,49 +11,40 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up AWS CLI
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: 'latest'
+      - uses: hashicorp/setup-terraform@v3
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Apply
+      - name: Terraform Init & Apply
         run: terraform apply -auto-approve
 
-      - name: Update kubeconfig
+      - name: Install kubectl
         run: |
-          aws eks --region $AWS_REGION update-kubeconfig --name kafka-cluster
+          curl -LO "https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
 
-      - name: Deploy Strimzi Operator
+      - name: Update kubeconfig
+        run: aws eks --region $AWS_REGION update-kubeconfig --name kafka-cluster
+
+      - name: Setup Kafka namespace & deploy Strimzi
         run: |
           kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f https://strimzi.io/install/latest?namespace=kafka -n kafka
 
-      - name: Deploy Kafka Cluster
-        run: kubectl apply -f kafka-cluster.yaml -n kafka
+      - name: Deploy Kafka & Bridge CRs
+        run: |
+          kubectl apply -f kafka-cluster.yaml -n kafka
+          kubectl apply -f kafka-bridge.yaml -n kafka
 
-      - name: Deploy Kafka Bridge
-        run: kubectl apply -f kafka-bridge.yaml -n kafka
-
-      # (Optional) - Check pod status and wait until all are ready
-      - name: Wait for Kafka Pods
+      - name: Wait for pods to be ready
         run: |
           kubectl wait --for=condition=ready pod -l strimzi.io/name=my-cluster-kafka -n kafka --timeout=600s
           kubectl wait --for=condition=ready pod -l strimzi.io/name=my-cluster-zookeeper -n kafka --timeout=600s
