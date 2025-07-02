@@ -5,13 +5,13 @@ variable "region" {
 }
 
 variable "key_name" {
-  description = "Name of EC2 Key Pair"
+  description = "Name of EC2 Key Pair (must exist in AWS)"
   type        = string
   default     = "eks-kafka"
 }
 
-variable "use_existing_roles" {
-  description = "When true, import existing IAM roles instead of creating new ones"
+variable "use_import_blocks" {
+  description = "When true, enable Terraform import blocks for existing IAM roles"
   type        = bool
   default     = true
 }
