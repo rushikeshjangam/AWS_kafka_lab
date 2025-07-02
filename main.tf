@@ -5,17 +5,11 @@ terraform {
       version = "~> 4.0"
     }
   }
-  required_version = ">= 1.0.0"
+  required_version = ">= 1.5.0"
 }
 
 provider "aws" {
   region = var.region
-}
-
-# EKS Cluster Role
-resource "aws_iam_role" "eks_cluster_role" {
-  name = "eks-cluster-role"
-  assume_role_policy = data.aws_iam_policy_document.eks_assume_role_policy.json
 }
 
 data "aws_iam_policy_document" "eks_assume_role_policy" {
@@ -29,6 +23,28 @@ data "aws_iam_policy_document" "eks_assume_role_policy" {
   }
 }
 
+data "aws_iam_policy_document" "eks_node_assume_role_policy" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role" "eks_cluster_role" {
+  name               = var.use_existing_roles ? null : "terraform-eks-cluster-role"
+  name_prefix        = var.use_existing_roles ? null : null
+  assume_role_policy = data.aws_iam_policy_document.eks_assume_role_policy.json
+
+  import {
+    id = "eks-cluster-role"
+    to = aws_iam_role.eks_cluster_role
+  }
+}
+
 resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSClusterPolicy" {
   role       = aws_iam_role.eks_cluster_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
@@ -39,20 +55,14 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSServicePolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSServicePolicy"
 }
 
-# EKS Node Group Role
 resource "aws_iam_role" "eks_node_role" {
-  name = "eks-node-group-role"
+  name               = var.use_existing_roles ? null : "terraform-eks-node-role"
+  name_prefix        = var.use_existing_roles ? null : null
   assume_role_policy = data.aws_iam_policy_document.eks_node_assume_role_policy.json
-}
 
-data "aws_iam_policy_document" "eks_node_assume_role_policy" {
-  statement {
-    effect = "Allow"
-    principals {
-      type        = "Service"
-      identifiers = ["ec2.amazonaws.com"]
-    }
-    actions = ["sts:AssumeRole"]
+  import {
+    id = "eks-node-group-role"
+    to = aws_iam_role.eks_node_role
   }
 }
 
@@ -71,7 +81,6 @@ resource "aws_iam_role_policy_attachment" "eks_node_AmazonEKS_CNI_Policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
 }
 
-# EKS Cluster
 resource "aws_eks_cluster" "this" {
   name     = "kafka-cluster"
   role_arn = aws_iam_role.eks_cluster_role.arn
@@ -81,7 +90,6 @@ resource "aws_eks_cluster" "this" {
   }
 }
 
-# EKS Node Group
 resource "aws_eks_node_group" "this" {
   cluster_name    = aws_eks_cluster.this.name
   node_group_name = "primary-node-group"
